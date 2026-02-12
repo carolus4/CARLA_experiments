@@ -24,3 +24,7 @@ Thumbs.db
 *.log
 results/
 checkpoints/
+
+# data: ignore all except illustrations
+data/*
+!data/illustrations/
