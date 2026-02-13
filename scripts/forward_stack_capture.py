@@ -4,6 +4,8 @@ import numpy as np
 from PIL import Image
 import carla
 
+from world_inspect import inspect_world
+
 OUT_DIR = "data/forward_stack"
 os.makedirs(OUT_DIR, exist_ok=True)
 
@@ -86,6 +88,8 @@ try:
         raise RuntimeError(f"Timeout waiting for frames from: {missing}")
 
 finally:
+    # Inspect the world after capture
+    inspect_world(world)
     # Cleanup
     for cam in cams.values():
         try:
