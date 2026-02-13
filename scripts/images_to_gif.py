@@ -1,23 +1,41 @@
 """
-Encode data/sunset_frames/frame_0000.png … frame_0062.png to data/sunset.gif.
+Encode frame_0000.png … in a folder to a GIF (e.g. data/cloudiness_frames -> data/cloudiness.gif).
 Uses ffmpeg two-pass palette for small file size. Requires ffmpeg on PATH.
 """
+import argparse
 import os
 import subprocess
 import tempfile
 
-INPUT_DIR = "data/sunset_frames"
 INPUT_PATTERN = "frame_%04d.png"
-OUTPUT_PATH = "data/sunset.gif"
 FPS = 10
 SCALE_WIDTH = 640  # width in px; height auto, keeps aspect ratio
 
 
 def main():
-    input_path = os.path.join(INPUT_DIR, INPUT_PATTERN)
-    if not os.path.isdir(INPUT_DIR):
-        raise SystemExit(f"Input directory not found: {INPUT_DIR}")
-    first_frame = os.path.join(INPUT_DIR, "frame_0000.png")
+    parser = argparse.ArgumentParser(
+        description="Encode a folder of frame_XXXX.png images to a GIF."
+    )
+    parser.add_argument(
+        "folder",
+        help="Input folder (e.g. cloudiness_frames or data/cloudiness_frames). "
+        "Output GIF is written to the same parent dir, name derived from folder (e.g. cloudiness.gif).",
+    )
+    args = parser.parse_args()
+
+    input_dir = args.folder
+    if not os.path.isabs(input_dir) and not input_dir.startswith("data"):
+        input_dir = os.path.join("data", input_dir)
+    input_dir = os.path.normpath(input_dir)
+
+    base = os.path.basename(input_dir)
+    out_name = base.replace("_frames", "") + ".gif"
+    output_path = os.path.join(os.path.dirname(input_dir) or ".", out_name)
+
+    input_path = os.path.join(input_dir, INPUT_PATTERN)
+    if not os.path.isdir(input_dir):
+        raise SystemExit(f"Input directory not found: {input_dir}")
+    first_frame = os.path.join(input_dir, "frame_0000.png")
     if not os.path.isfile(first_frame):
         raise SystemExit(f"Frame sequence not found (e.g. {first_frame})")
 
@@ -45,7 +63,7 @@ def main():
             "-i", input_path,
             "-i", palette_path,
             "-lavfi", f"fps={FPS},scale={SCALE_WIDTH}:-1:flags=lanczos[x];[x][1:v]paletteuse",
-            OUTPUT_PATH,
+            output_path,
         ]
         result = subprocess.run(cmd_gif, capture_output=True, text=True)
         if result.returncode != 0:
@@ -56,8 +74,8 @@ def main():
         except FileNotFoundError:
             pass
 
-    size_mb = os.path.getsize(OUTPUT_PATH) / (1024 * 1024)
-    print(f"Wrote {OUTPUT_PATH} ({size_mb:.1f} MB, {SCALE_WIDTH}px wide, {FPS} fps)")
+    size_mb = os.path.getsize(output_path) / (1024 * 1024)
+    print(f"Wrote {output_path} ({size_mb:.1f} MB, {SCALE_WIDTH}px wide, {FPS} fps)")
 
 
 if __name__ == "__main__":
