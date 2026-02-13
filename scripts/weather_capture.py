@@ -4,10 +4,20 @@ Output: data/<preset>_frames/frame_0000.png ...
 """
 import argparse
 import os
+import sys
 import threading
 import numpy as np
 from PIL import Image
 import carla
+
+# Default scene weather (same as set_scene.py); restore to this after capture
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from set_scene import (
+    DEFAULT_CLOUDINESS,
+    DEFAULT_PRECIPITATION,
+    DEFAULT_WETNESS,
+    DEFAULT_SUN_ALTITUDE_ANGLE,
+)
 
 PRESETS = {
     "sunset": {
@@ -144,6 +154,15 @@ def main():
             pass
         try:
             world.apply_settings(original_settings)
+        except Exception:
+            pass
+        try:
+            weather = world.get_weather()
+            weather.cloudiness = DEFAULT_CLOUDINESS
+            weather.precipitation = DEFAULT_PRECIPITATION
+            weather.wetness = DEFAULT_WETNESS
+            weather.sun_altitude_angle = DEFAULT_SUN_ALTITUDE_ANGLE
+            world.set_weather(weather)
         except Exception:
             pass
 
