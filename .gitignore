@@ -28,3 +28,6 @@ checkpoints/
 # data: ignore all except illustrations
 data/*
 !data/illustrations/
+
+# carla: ignore the carla binary and associated files
+carla/
