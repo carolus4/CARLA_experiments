@@ -3,11 +3,16 @@ set -euo pipefail
 
 if [ $# -lt 1 ]; then
   echo "Usage:"
-  echo "  ./setup_runpod_carla.sh \"ssh user@host -p 12345 -i ~/.ssh/id_ed25519\""
+  echo "  ./setup_runpod_carla.sh \"ssh user@host -p 12345 -i ~/.ssh/id_ed25519\" [--no-install]"
+  echo ""
+  echo "  By default: installs CARLA on the pod if missing, then starts CARLA (ready to develop)."
+  echo "  --no-install  Skip install; only start CARLA if already installed."
   exit 1
 fi
 
 SSH_CMD="$1"
+INSTALL=1
+[ "${2:-}" = "--no-install" ] && INSTALL=0
 
 # -----------------------------
 # Config (override via env vars)
@@ -177,20 +182,35 @@ if pgrep -u carla -f "CarlaUE4.sh.*-carla-rpc-port=${CARLA_PORT}" >/dev/null 2>&
   exit 0
 fi
 
-# Start it
+# CARLA not installed?
 if [ ! -x "$CARLA_DIR/CarlaUE4.sh" ]; then
-  echo "⚠️ CarlaUE4.sh not found/executable at: $CARLA_DIR/CarlaUE4.sh"
-  echo "Set CARLA_DIR env var or install CARLA there."
-  exit 1
+  if [ "$INSTALL" = "1" ]; then
+    if [ -f "$REPO_DIR/infra/install_carla.sh" ]; then
+      echo "CARLA not found at $CARLA_DIR. Running install script..."
+      sudo START_CARLA=1 bash "$REPO_DIR/infra/install_carla.sh"
+    else
+      echo "Install script not found at $REPO_DIR/infra/install_carla.sh"
+      echo "Ensure the repo is cloned (e.g. at $REPO_DIR) then run again without --no-install."
+      exit 1
+    fi
+  else
+    echo "CARLA not installed at $CARLA_DIR."
+    echo "Next: install on the pod, then start:"
+    echo "  ssh $ALIAS 'sudo bash $REPO_DIR/infra/install_carla.sh'"
+    echo "Or run this script without --no-install to install and start automatically."
+    exit 0
+  fi
+  exit 0
 fi
 
+# Start it
 run_as_carla "nohup '$CARLA_DIR/CarlaUE4.sh' $CARLA_ARGS > /home/carla/carla_${CARLA_PORT}.log 2>&1 &"
 sleep 1
 
 if pgrep -u carla -f "CarlaUE4.sh.*-carla-rpc-port=${CARLA_PORT}" >/dev/null 2>&1; then
   echo "CARLA started (log: /home/carla/carla_${CARLA_PORT}.log)"
 else
-  echo "⚠️ Tried to start CARLA but process not detected. Check log: /home/carla/carla_${CARLA_PORT}.log"
+  echo "Tried to start CARLA but process not detected. Check log: /home/carla/carla_${CARLA_PORT}.log"
   exit 1
 fi
 REMOTE

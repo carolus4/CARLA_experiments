@@ -7,10 +7,9 @@ set -euo pipefail
 CARLA_VERSION="${CARLA_VERSION:-0.9.16}"
 CARLA_URL="${CARLA_URL:-https://tiny.carla.org/carla-0-9-16-linux}"
 
-# Install location on the mounted volume (persists across pod migration)
-PERSIST_ROOT="${PERSIST_ROOT:-/workspace}"
-CARLA_ROOT="${CARLA_ROOT:-$PERSIST_ROOT/carla}"
-CARLA_TARBALL="${CARLA_TARBALL:-$PERSIST_ROOT/cache/CARLA_${CARLA_VERSION}.tar.gz}"
+# Install location (override with CARLA_ROOT env)
+CARLA_ROOT="${CARLA_ROOT:-/opt/carla}"
+CARLA_TARBALL="${CARLA_TARBALL:-/opt/carla_cache/CARLA_${CARLA_VERSION}.tar.gz}"
 
 # CARLA runtime user (CARLA refuses root)
 CARLA_USER="${CARLA_USER:-carla}"
@@ -18,7 +17,7 @@ CARLA_USER="${CARLA_USER:-carla}"
 # Whether to chown the CARLA install dir to CARLA_USER
 CHOWN_INSTALL="${CHOWN_INSTALL:-1}"
 
-echo "==> CARLA persistent install"
+echo "==> CARLA install (to /opt)"
 echo "    version:     $CARLA_VERSION"
 echo "    url:         $CARLA_URL"
 echo "    install dir: $CARLA_ROOT"
@@ -60,10 +59,10 @@ chmod 1777 /tmp/.X11-unix
 echo "==> Dependencies installed."
 
 # -----------------------------
-# Ensure persistent directories
+# Ensure install and cache directories
 # -----------------------------
-echo "==> Preparing persistent directories..."
-mkdir -p "$PERSIST_ROOT/cache"
+echo "==> Preparing install and cache directories..."
+mkdir -p "$(dirname "$CARLA_TARBALL")"
 mkdir -p "$CARLA_ROOT"
 
 # -----------------------------
@@ -77,7 +76,7 @@ else
 fi
 
 # -----------------------------
-# Extract CARLA into /workspace/carla
+# Extract CARLA to CARLA_ROOT
 # -----------------------------
 # Marker file so we can rerun safely
 MARKER="$CARLA_ROOT/.installed_${CARLA_VERSION}"
@@ -89,7 +88,8 @@ else
   # Clear target dir (avoid mixing versions)
   rm -rf "$CARLA_ROOT"
   mkdir -p "$CARLA_ROOT"
-  tar -xzf "$CARLA_TARBALL" -C "$CARLA_ROOT" --strip-components=1
+  # --no-same-owner: tarball has uid 1000; avoid "Cannot change ownership" on restricted fs (e.g. RunPod/Docker)
+  tar -xzf "$CARLA_TARBALL" -C "$CARLA_ROOT" --strip-components=1 --no-same-owner
 
   touch "$MARKER"
   echo "==> Extract complete."
@@ -118,16 +118,16 @@ if [ "$CHOWN_INSTALL" = "1" ]; then
 fi
 
 # -----------------------------
-# Helper launch script (persistent)
+# Helper launch script
 # -----------------------------
-echo "==> Writing helper scripts to $PERSIST_ROOT/bin ..."
-mkdir -p "$PERSIST_ROOT/bin"
+mkdir -p "$CARLA_ROOT/bin"
+echo "==> Writing helper script to $CARLA_ROOT/bin/start_carla.sh ..."
 
-cat > "$PERSIST_ROOT/bin/start_carla.sh" <<'EOF'
+cat > "$CARLA_ROOT/bin/start_carla.sh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
-CARLA_ROOT="${CARLA_ROOT:-/workspace/carla}"
+CARLA_ROOT="${CARLA_ROOT:-/opt/carla}"
 CARLA_PORT="${CARLA_PORT:-2000}"
 
 # Many headless GPU envs are more stable with OpenGL + Xvfb
@@ -168,8 +168,8 @@ else
 fi
 EOF
 
-chmod +x "$PERSIST_ROOT/bin/start_carla.sh"
-chown "$CARLA_USER:$CARLA_USER" "$PERSIST_ROOT/bin/start_carla.sh"
+chmod +x "$CARLA_ROOT/bin/start_carla.sh"
+chown -R "$CARLA_USER:$CARLA_USER" "$CARLA_ROOT/bin"
 
 # -----------------------------
 # Python client package (optional)
@@ -183,6 +183,12 @@ echo "==> Done."
 echo "CARLA installed at: $CARLA_ROOT"
 echo "Cached tarball at:  $CARLA_TARBALL"
 echo
-echo "Next:"
-echo "  su - $CARLA_USER"
-echo "  /workspace/bin/start_carla.sh"
+
+if [ "${START_CARLA:-0}" = "1" ]; then
+  echo "==> Starting CARLA (START_CARLA=1)..."
+  su - "$CARLA_USER" -c "$CARLA_ROOT/bin/start_carla.sh"
+else
+  echo "Next:"
+  echo "  su - $CARLA_USER"
+  echo "  $CARLA_ROOT/bin/start_carla.sh"
+fi
