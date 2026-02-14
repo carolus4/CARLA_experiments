@@ -1,6 +1,6 @@
 # CARLA_experiments
 
-This repo documents hands-on experiments with CARLA (0.9.16) to better understand how simulation environments are configured and controlled. I'm particularly interested in areas where visual realism breaks down, creating the sim-to-real gap for training and validation.
+This repo documents hands-on experiments with CARLA to better understand how simulation environments are configured and controlled. I'm particularly interested in areas where visual realism breaks down, creating the sim-to-real gap for training and validation.
 
 My approach is based on 
 - [CARLA 0.9.16 docs](https://carla.readthedocs.io/en/0.9.16/)
