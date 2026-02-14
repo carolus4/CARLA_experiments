@@ -8,7 +8,7 @@ My approach is based on
 - ChatGPT 5.2 and Claude Opus 4.6 for planning and coding
 
 ## 01. Run carla on Runpod
-Stood up CARLA headless on RunPod (RTX 4090), separated engine from experiment workspace, validated reproducibility.
+Stood up CARLA headless on RunPod (RTX 4090), separated engine from experiment workspace, validated reproducibility. Added setup and installation scripts for easy teardown and rebuild of a pod.
 
 → [Bootstrapping notes]((notes/01.%20runpod%20bootstrapping.md))
 
