@@ -85,14 +85,48 @@ if [ -f "$MARKER" ]; then
   echo "==> CARLA already extracted for ${CARLA_VERSION} (marker exists). Skipping extract."
 else
   echo "==> Extracting CARLA to $CARLA_ROOT ..."
-  # Clear target dir (avoid mixing versions)
   rm -rf "$CARLA_ROOT"
   mkdir -p "$CARLA_ROOT"
+  # Extract without strip-components; tarball layout varies (e.g. single top-level dir or not)
   # --no-same-owner: tarball has uid 1000; avoid "Cannot change ownership" on restricted fs (e.g. RunPod/Docker)
-  tar -xzf "$CARLA_TARBALL" -C "$CARLA_ROOT" --strip-components=1 --no-same-owner
+  tar -xzf "$CARLA_TARBALL" -C "$CARLA_ROOT" --no-same-owner
 
   touch "$MARKER"
   echo "==> Extract complete."
+fi
+
+# Flatten helper: if CarlaUE4.sh is in a subdir, move its contents to CARLA_ROOT
+flatten_carla_root() {
+  CARLA_SH=$(find "$CARLA_ROOT" -name "CarlaUE4.sh" -type f 2>/dev/null | head -1)
+  [ -z "$CARLA_SH" ] && CARLA_SH=$(find "$CARLA_ROOT" -iname "carlaue4.sh" -type f 2>/dev/null | head -1)
+  if [ -n "$CARLA_SH" ]; then
+    SUBDIR=$(dirname "$CARLA_SH")
+    echo "==> Flattening: $SUBDIR -> $CARLA_ROOT"
+    mv "$SUBDIR"/* "$CARLA_ROOT/" 2>/dev/null || true
+    for _f in "$SUBDIR"/.[!.]* "$SUBDIR"/..?*; do
+      [ -e "$_f" ] && mv "$_f" "$CARLA_ROOT/" 2>/dev/null || true
+    done
+    rm -rf "$SUBDIR"
+    find "$CARLA_ROOT" -depth -type d -empty -delete 2>/dev/null || true
+    return 0
+  fi
+  return 1
+}
+
+# If CarlaUE4.sh not in CARLA_ROOT, try flattening (tarball has nested top-level dirs)
+if [ ! -x "$CARLA_ROOT/CarlaUE4.sh" ]; then
+  flatten_carla_root || true
+fi
+
+# If still missing, layout may be corrupt (e.g. from old --strip-components extract). Re-extract.
+if [ ! -x "$CARLA_ROOT/CarlaUE4.sh" ]; then
+  echo "==> CarlaUE4.sh not found under $CARLA_ROOT (corrupt layout). Re-extracting..."
+  rm -f "$MARKER"
+  rm -rf "$CARLA_ROOT"
+  mkdir -p "$CARLA_ROOT"
+  tar -xzf "$CARLA_TARBALL" -C "$CARLA_ROOT" --no-same-owner
+  touch "$MARKER"
+  flatten_carla_root || true
 fi
 
 # Ensure executable
@@ -185,6 +219,14 @@ echo "Cached tarball at:  $CARLA_TARBALL"
 echo
 
 if [ "${START_CARLA:-0}" = "1" ]; then
+  if [ ! -x "$CARLA_ROOT/CarlaUE4.sh" ]; then
+    echo "==> ERROR: CarlaUE4.sh missing at $CARLA_ROOT. Layout on pod:"
+    ls -la "$CARLA_ROOT" 2>/dev/null || true
+    echo "==> Any *Carla*/*.sh under CARLA_ROOT:"
+    find "$CARLA_ROOT" -type f \( -name "*arla*" -o -name "*.sh" \) 2>/dev/null | head -30
+    echo "==> Ensure repo on pod has latest install_carla.sh (git pull), then re-run install."
+    exit 1
+  fi
   echo "==> Starting CARLA (START_CARLA=1)..."
   su - "$CARLA_USER" -c "$CARLA_ROOT/bin/start_carla.sh"
 else

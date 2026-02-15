@@ -187,7 +187,11 @@ if [ ! -x "$CARLA_DIR/CarlaUE4.sh" ]; then
   if [ "$INSTALL" = "1" ]; then
     if [ -f "$REPO_DIR/infra/install_carla.sh" ]; then
       echo "CARLA not found at $CARLA_DIR. Running install script..."
-      sudo START_CARLA=1 bash "$REPO_DIR/infra/install_carla.sh"
+      if [ "\$(id -u)" -eq 0 ]; then
+        START_CARLA=1 bash "$REPO_DIR/infra/install_carla.sh"
+      else
+        sudo START_CARLA=1 bash "$REPO_DIR/infra/install_carla.sh"
+      fi
     else
       echo "Install script not found at $REPO_DIR/infra/install_carla.sh"
       echo "Ensure the repo is cloned (e.g. at $REPO_DIR) then run again without --no-install."
@@ -195,8 +199,8 @@ if [ ! -x "$CARLA_DIR/CarlaUE4.sh" ]; then
     fi
   else
     echo "CARLA not installed at $CARLA_DIR."
-    echo "Next: install on the pod, then start:"
-    echo "  ssh $ALIAS 'sudo bash $REPO_DIR/infra/install_carla.sh'"
+    echo "Next: install on the pod (as root), then start:"
+    echo "  ssh $ALIAS 'bash $REPO_DIR/infra/install_carla.sh'"
     echo "Or run this script without --no-install to install and start automatically."
     exit 0
   fi
