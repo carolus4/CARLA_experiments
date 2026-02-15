@@ -7,19 +7,23 @@ My approach is based on
 - Insights and advice from Carla users and industry experts (thank you!)
 - ChatGPT 5.2 and Claude Opus 4.6 for planning and coding
 
-## 01. Run carla on Runpod
+## 01. CARLA on Runpod
 Stood up CARLA headless on RunPod (RTX 4090), separated engine from experiment workspace, validated reproducibility. Added setup and installation scripts for easy teardown and rebuild of a pod.
 
 → [Bootstrapping notes]((notes/01.%20runpod%20bootstrapping.md))
 
 
-## 02. Render Capture
+## 02. Sensors & Renders
 Explored RGB + depth renders, multi-camera setups, sync vs async modes, and capture pipelines.
 
 → [Renders and notes](notes/02.%20sensor%20tests.md)
 
 ## 03. World variations
 
-Systematically varied weather (sun position, cloudiness, precipitation, wetness) and actors (oncoming traffic, pedestrian on crosswalk) to review realism.
+Systematically varied environment (sun position, cloudiness, precipitation, wetness) and actors (oncoming traffic, pedestrian on crosswalk) to review realism.
+
+![Precipitation](data/illustrations/precipitation.gif)
+
+![Walker](data/illustrations/walker.gif)
 
 → [Variations and notes](notes/03.%20worldbuilding.md)
