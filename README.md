@@ -10,7 +10,7 @@ My approach is based on
 ## 01. CARLA on Runpod
 Stood up CARLA headless on RunPod (RTX 4090), separated engine from experiment workspace, validated reproducibility. Added setup and installation scripts for easy teardown and rebuild of a pod.
 
-→ [Bootstrapping notes]((notes/01.%20runpod%20bootstrapping.md))
+→ [Bootstrapping notes](notes/01.%20runpod%20bootstrapping.md)
 
 
 ## 02. Sensors & Renders
