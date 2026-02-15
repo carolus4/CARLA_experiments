@@ -218,6 +218,18 @@ echo "==> Installing Python package carla==${CARLA_VERSION}..."
 python3 -m pip install --upgrade pip
 python3 -m pip install "carla==${CARLA_VERSION}"
 
+# -----------------------------
+# Project dependencies (if run from repo)
+# -----------------------------
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+if [ -f "$REPO_ROOT/requirements.txt" ]; then
+  echo "==> Installing project dependencies from requirements.txt..."
+  python3 -m pip install -r "$REPO_ROOT/requirements.txt"
+else
+  echo "==> No requirements.txt at $REPO_ROOT; skipping project deps."
+fi
+
 echo
 echo "==> Done."
 echo "CARLA installed at: $CARLA_ROOT"

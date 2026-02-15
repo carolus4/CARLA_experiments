@@ -167,6 +167,21 @@ fi
 REMOTE
 
 # -----------------------------
+# Remote: install project Python deps
+# -----------------------------
+echo "==> Installing project Python dependencies (requirements.txt)..."
+
+ssh -T "$ALIAS" "bash -s" <<REMOTE
+set -euo pipefail
+if [ -f "$REPO_DIR/requirements.txt" ]; then
+  python3 -m pip install -q -r "$REPO_DIR/requirements.txt"
+  echo "Project dependencies installed."
+else
+  echo "No requirements.txt at $REPO_DIR; skipping."
+fi
+REMOTE
+
+# -----------------------------
 # Remote: start CARLA if not running (as carla)
 # -----------------------------
 echo "==> Starting CARLA if not already running (dir: $CARLA_DIR, port: $CARLA_PORT)..."
