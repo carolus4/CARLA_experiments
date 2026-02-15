@@ -95,12 +95,18 @@ else
   echo "==> Extract complete."
 fi
 
-# Flatten helper: if CarlaUE4.sh is in a subdir, move its contents to CARLA_ROOT
+# Flatten helper: if CarlaUE4.sh is in a subdir, move its contents to CARLA_ROOT (never when it's already in CARLA_ROOT)
 flatten_carla_root() {
   CARLA_SH=$(find "$CARLA_ROOT" -name "CarlaUE4.sh" -type f 2>/dev/null | head -1)
   [ -z "$CARLA_SH" ] && CARLA_SH=$(find "$CARLA_ROOT" -iname "carlaue4.sh" -type f 2>/dev/null | head -1)
   if [ -n "$CARLA_SH" ]; then
     SUBDIR=$(dirname "$CARLA_SH")
+    # Already at CARLA_ROOT: nothing to flatten (tarball had no top-level dir). Do NOT rm -rf!
+    SUBDIR_ABS=$(cd "$SUBDIR" 2>/dev/null && pwd -P)
+    CARLA_ABS=$(cd "$CARLA_ROOT" 2>/dev/null && pwd -P)
+    if [ -n "$SUBDIR_ABS" ] && [ "$SUBDIR_ABS" = "$CARLA_ABS" ]; then
+      return 0
+    fi
     echo "==> Flattening: $SUBDIR -> $CARLA_ROOT"
     mv "$SUBDIR"/* "$CARLA_ROOT/" 2>/dev/null || true
     for _f in "$SUBDIR"/.[!.]* "$SUBDIR"/..?*; do
