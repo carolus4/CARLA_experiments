@@ -35,12 +35,6 @@ PRESETS = {
     },
 }
 
-# Placement: in front of ego (walker closer so clearly in frame)
-DIST_MIN_WALKER = 8.0
-DIST_MAX_WALKER = 22.0
-# Lateral: min separation from center so we get left/right sides (meters)
-LATERAL_MIN_WALKER = 0.5
-LATERAL_MAX_WALKER = 15.0
 # Fixed walker placement: sidewalk on the right in front, then cross to left (meters)
 # Further ahead = more of the walk in shot before they pass the car
 WALKER_AHEAD_M = 15.0
@@ -87,69 +81,6 @@ def get_walker_crossing_fixed(ego_transform: carla.Transform):
         z=ego_loc.z,
     )
     return start_loc, target_loc
-
-
-def find_walker_crossing_points(world: carla.World, ego_transform: carla.Transform, max_samples: int = 600):
-    """
-    Collect nav locations in front of ego in a tight band so the crossing is in camera view.
-    Left = negative lateral (right vector); right = positive. Keeps lateral within LATERAL_MAX_WALKER.
-    """
-    ego_loc = ego_transform.location
-    forward = _ego_forward(ego_transform)
-    right = _ego_right(ego_transform)
-
-    left_points = []
-    right_points = []
-
-    for _ in range(max_samples):
-        loc = world.get_random_location_from_navigation()
-        if loc is None:
-            continue
-        to_loc = carla.Vector3D(loc.x - ego_loc.x, loc.y - ego_loc.y, loc.z - ego_loc.z)
-        dist = math.sqrt(to_loc.x ** 2 + to_loc.y ** 2 + to_loc.z ** 2)
-        if dist < DIST_MIN_WALKER or dist > DIST_MAX_WALKER:
-            continue
-        if _dot(to_loc, forward) <= 0:
-            continue
-        dot_right = _dot(to_loc, right)
-        if dot_right <= -LATERAL_MIN_WALKER and dot_right >= -LATERAL_MAX_WALKER:
-            left_points.append(loc)
-        elif dot_right >= LATERAL_MIN_WALKER and dot_right <= LATERAL_MAX_WALKER:
-            right_points.append(loc)
-        if len(left_points) >= 5 and len(right_points) >= 5:
-            break
-
-    if not left_points or not right_points:
-        # Fallback: wider distance (5-45m) and any lateral separation
-        left_points.clear()
-        right_points.clear()
-        for _ in range(max_samples):
-            loc = world.get_random_location_from_navigation()
-            if loc is None:
-                continue
-            to_loc = carla.Vector3D(loc.x - ego_loc.x, loc.y - ego_loc.y, loc.z - ego_loc.z)
-            dist = math.sqrt(to_loc.x ** 2 + to_loc.y ** 2 + to_loc.z ** 2)
-            if dist < 5.0 or dist > 45.0:
-                continue
-            if _dot(to_loc, forward) <= 0:
-                continue
-            dot_right = _dot(to_loc, right)
-            if dot_right < -0.5:
-                left_points.append(loc)
-            elif dot_right > 0.5:
-                right_points.append(loc)
-            if len(left_points) >= 3 and len(right_points) >= 3:
-                break
-
-    if not left_points or not right_points:
-        raise RuntimeError(
-            "Could not find enough pedestrian nav points in front of ego (left and right). "
-            "Map may need pedestrian navigation or different ego spawn."
-        )
-    random.seed(SEED)
-    start = random.choice(left_points)
-    target = random.choice(right_points)
-    return start, target
 
 
 def find_oncoming_spawn_point(world: carla.World, ego_transform: carla.Transform):
