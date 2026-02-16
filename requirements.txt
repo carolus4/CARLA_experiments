@@ -8,3 +8,6 @@ pyyaml>=6.0
 # For CARLA BasicAgent (third_party/carla_pythonapi)
 networkx
 shapely
+
+# For HUD overlay (scripts/carla_hud.py)
+pygame>=2.0
