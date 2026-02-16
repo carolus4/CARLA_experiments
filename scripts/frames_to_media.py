@@ -2,7 +2,8 @@
 Encode frame_0000.png … in a folder to GIF or MP4 video.
 Usage: python frames_to_media.py [--format gif|video] folder_name
 
-GIF uses ffmpeg two-pass palette for small file size. Requires ffmpeg on PATH.
+GIF uses the first 5 seconds (50 frames at 10 fps), ffmpeg two-pass palette for small file size.
+Requires ffmpeg on PATH.
 """
 import argparse
 import os
@@ -12,6 +13,7 @@ import tempfile
 INPUT_PATTERN = "frame_%04d.png"
 FPS = 10
 SCALE_WIDTH = 640  # width in px; height auto, keeps aspect ratio
+GIF_FRAME_LIMIT = 50  # first 5 seconds at 10 fps
 
 
 def resolve_paths(folder: str):
@@ -33,6 +35,7 @@ def encode_gif(input_path: str, output_path: str) -> None:
             "-framerate", str(FPS),
             "-i", input_path,
             "-vf", f"fps={FPS},scale={SCALE_WIDTH}:-1:flags=lanczos,palettegen",
+            "-vframes", str(GIF_FRAME_LIMIT),
             palette_path,
         ]
         result = subprocess.run(cmd_palette, capture_output=True, text=True)
@@ -44,6 +47,7 @@ def encode_gif(input_path: str, output_path: str) -> None:
             "-i", input_path,
             "-i", palette_path,
             "-lavfi", f"fps={FPS},scale={SCALE_WIDTH}:-1:flags=lanczos[x];[x][1:v]paletteuse",
+            "-vframes", str(GIF_FRAME_LIMIT),
             output_path,
         ]
         result = subprocess.run(cmd_gif, capture_output=True, text=True)
