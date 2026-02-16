@@ -2,8 +2,11 @@
 2D route map: Google Maps-style schematic with start (A) and end (B).
 Step-by-step: connect → densify roads → choose start/end → draw → save.
 Optional: aerial top-down render as background with aligned overlay.
+Optional: GlobalRoutePlanner route A→B overlaid (when vendored agents available).
 """
 import math
+import os
+import sys
 import time
 
 import carla
@@ -11,12 +14,29 @@ import matplotlib.pyplot as plt
 import numpy as np
 from pathlib import Path
 
+# Prepend vendored CARLA PythonAPI so GlobalRoutePlanner is importable
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+_repo_root = os.path.dirname(_script_dir)
+_vendored = os.path.join(_repo_root, "third_party", "carla_pythonapi")
+if os.path.isdir(_vendored) and _vendored not in sys.path:
+    sys.path.insert(0, _vendored)
+
 HOST, PORT = "127.0.0.1", 2000
 USE_AERIAL = True  # Set False to skip aerial capture and use schematic-only
+DRAW_START_END = True   # Set False for map-only (no A/B markers)
+DRAW_GRP_ROUTE = True   # Set False for map-only (no green route line)
 
 DENSE_STEP = 2.0  # meters between waypoints when walking lane splines
-ARROW_SUBSAMPLE = 16  # show a direction arrow every N-th dense waypoint pair (higher = fewer arrows)
-MAX_SPAWN_DISTANCE = 800  # meters – pick the farthest spawn from start
+ARROW_SUBSAMPLE = 24  # show a direction arrow every N-th dense waypoint pair
+# Arrow size (matplotlib quiver): smaller scale = longer arrows; width/head* = thickness and head size
+ARROW_SCALE = 8         # quiver scale (e.g. 4 = bigger, 10 = smaller)
+ARROW_SHAFT_WIDTH = 0.005
+ARROW_HEADWIDTH = 3
+ARROW_HEADLENGTH = 4
+END_SPAWN_INDEX = 10  # which spawn point to use for B
+
+# GlobalRoutePlanner sampling resolution (meters between graph nodes)
+GRP_SAMPLING_RESOLUTION = 2.0
 
 
 # --- Step 1: Connect to CARLA, load preferred map, get carla_map -----------
@@ -129,9 +149,15 @@ def capture_aerial(world, x_min, x_max, y_min, y_max, image_size=1920):
 
     Returns (rgb_array, extent) or (None, None) on failure.
     extent = (x_lo, x_hi, y_lo, y_hi) in plot coords (Y-negated).
+
+    Camera orientation (pitch=-90, yaw=-90) is chosen so the raw image
+    maps directly to our plot axes with no post-rotation needed:
+      - increasing column  →  +X world  (plot X, left-to-right)
+      - increasing row     →  +Y world  (= -plot_Y, top-to-bottom)
+    Used with imshow(origin="upper") so row 0 is at the top of the figure.
     """
-    # Camera aims at the centre of the *world-space* bounds.
-    # Note: y_min/y_max are already negated, so negate back for CARLA.
+    # x_min..x_max and y_min..y_max are in *plot* coords (Y already negated).
+    # Convert centre back to CARLA world-Y for the camera spawn.
     cx = (x_min + x_max) / 2
     cy_world = -(y_min + y_max) / 2  # back to CARLA Y
     side = max(x_max - x_min, y_max - y_min)
@@ -160,10 +186,14 @@ def capture_aerial(world, x_min, x_max, y_min, y_max, image_size=1920):
         bp.set_attribute("image_size_x", str(image_size))
         bp.set_attribute("image_size_y", str(image_size))
         bp.set_attribute("fov", str(fov_deg))
-        # pitch=-90 looks straight down; yaw=0 means camera-right = world-Y
+
+        # pitch=-90 → look straight down (-Z).
+        # yaw=-90  → camera-right = +X world, camera-up = -Y world = +plot_Y.
+        # This means image columns = world X, image rows = world Y, which
+        # matches our plot axes directly (no rotation/flip needed).
         transform = carla.Transform(
             carla.Location(x=cx, y=cy_world, z=height),
-            carla.Rotation(pitch=-90, yaw=0, roll=0),
+            carla.Rotation(pitch=-90, yaw=-90, roll=0),
         )
         camera = world.spawn_actor(bp, transform)
         camera.listen(on_image)
@@ -176,23 +206,21 @@ def capture_aerial(world, x_min, x_max, y_min, y_max, image_size=1920):
         if "rgb" not in captured:
             return None, None
 
-        # The camera looks down with pitch=-90, yaw=0.
-        # Image row 0 = world -X direction, col 0 = world -Y direction.
-        # We need: row 0 → plot Y-max (top), col 0 → plot X-min (left).
-        # Plot Y = -world_Y, so col 0 (world -Y) = plot +Y → need flip rows.
-        # Row 0 (world -X) should map to plot-top (Y-max), but X is horizontal
-        # in our plot → we need a 90° rotation.
         rgb = captured["rgb"]
-        # Rotate 90° counter-clockwise: maps (row→-X, col→-Y) to
-        # (row→-Y = plot+Y top-to-bottom, col→-X → plot-X left-to-right after flip)
-        rgb = np.rot90(rgb, k=1)
-        # After rot90(k=1): row 0 = old last-col = world +Y = plot -Y.
-        # We want row 0 = plot Y-max, so flip vertically.
-        rgb = rgb[::-1]
-        # col 0 = old row 0 = world -X = plot -X (left). ✓
+        # No rotation needed — axes already aligned.
 
+        # extent for imshow: [x_left, x_right, y_bottom, y_top]
+        # Column 0 = world (cx - half_side) = plot x_min
+        # Column max = world (cx + half_side) = plot x_max
+        # Row 0 (top, origin="upper") = world (cy_world - half_side)
+        #   → plot_y = -(cy_world - half_side) = -cy_world + half_side
+        # Row max (bottom) = world (cy_world + half_side)
+        #   → plot_y = -(cy_world + half_side) = -cy_world - half_side
+        y_plot_top = -cy_world + half_side
+        y_plot_bottom = -cy_world - half_side
         extent = (cx - half_side, cx + half_side,
-                  -(cy_world + half_side), -(cy_world - half_side))
+                  y_plot_bottom, y_plot_top)
+
         return np.ascontiguousarray(rgb), extent
 
     except Exception:
@@ -206,10 +234,10 @@ def capture_aerial(world, x_min, x_max, y_min, y_max, image_size=1920):
         world.apply_settings(original_settings)
 
 
-# --- Step 3: Choose start and end (spawns[0] and spawns[10]) ----------------
+# --- Step 3: Choose start and end (spawns[0] and spawns[END_SPAWN_INDEX]) --
 
 def choose_start_end(carla_map):
-    """Pick start = spawns[0], end = spawns[10] (or last if fewer)."""
+    """Pick start = spawns[0], end = spawns[END_SPAWN_INDEX] (or last if fewer)."""
     spawns = carla_map.get_spawn_points()
     if len(spawns) < 2:
         wp = carla_map.get_waypoint(
@@ -219,7 +247,7 @@ def choose_start_end(carla_map):
         return wp, wp
 
     start_tf = spawns[0]
-    end_idx = min(10, len(spawns) - 1)
+    end_idx = min(END_SPAWN_INDEX, len(spawns) - 1)
     end_tf = spawns[end_idx]
 
     start_wp = carla_map.get_waypoint(
@@ -233,34 +261,76 @@ def choose_start_end(carla_map):
     return start_wp, end_wp
 
 
+# --- Step 3b: GlobalRoutePlanner route A→B (optional) -------------------
+
+def compute_grp_route(carla_map, start_wp, end_wp,
+                      sampling_resolution=GRP_SAMPLING_RESOLUTION):
+    """Compute shortest route from start to end using GlobalRoutePlanner.
+
+    Returns (route_xs, route_ys) in plot coords (Y negated), or (None, None) if
+    GlobalRoutePlanner is unavailable or any error occurs (optional feature).
+    """
+    try:
+        from agents.navigation.global_route_planner import GlobalRoutePlanner
+    except ImportError:
+        return None, None
+
+    try:
+        grp = GlobalRoutePlanner(carla_map, sampling_resolution)
+        origin = start_wp.transform.location
+        destination = end_wp.transform.location
+        route_trace = grp.trace_route(origin, destination)
+        if not route_trace:
+            return None, None
+
+        route_xs = []
+        route_ys = []
+        for wp, _ in route_trace:
+            loc = wp.transform.location
+            route_xs.append(loc.x)
+            route_ys.append(-loc.y)
+        return route_xs, route_ys
+    except Exception:
+        return None, None
+
+
+def draw_grp_route(ax, route_xs, route_ys, color="#34A853",
+                   linewidth=2.5, zorder=3):
+    """Draw the GlobalRoutePlanner route as a single polyline on the map."""
+    if not route_xs or not route_ys:
+        return
+    ax.plot(route_xs, route_ys, color=color, linewidth=linewidth, zorder=zorder)
+
+
 # --- Step 4: Draw the map ------------------------------------------------
 
 def draw_map(ax, xs, ys, *, road_color="#2d2d2d", linewidth=1.0,
              title=None, arrow_data=None, use_aerial=False):
+    if use_aerial:
+        ax.plot(xs, ys, color="white", linewidth=linewidth + 1.0, zorder=0.5)
     ax.plot(xs, ys, color=road_color, linewidth=linewidth, zorder=1)
 
     if arrow_data:
         mid_xs, mid_ys, us, vs = arrow_data
         if mid_xs:
-            # Arrows in yellow so they stand out on both roads and aerial
             arrow_color = "#F4C430" if use_aerial else road_color
             ax.quiver(
                 mid_xs, mid_ys, us, vs,
                 color=arrow_color,
                 angles="xy",
-                scale_units="xy",
-                scale=1 / 12,
-                width=0.004,
-                headwidth=4,
-                headlength=5,
+                scale_units="inches",
+                scale=ARROW_SCALE,
+                width=ARROW_SHAFT_WIDTH,
+                headwidth=ARROW_HEADWIDTH,
+                headlength=ARROW_HEADLENGTH,
                 zorder=2,
             )
 
     ax.set_aspect("equal")
     ax.set_facecolor("none" if use_aerial else "#f5f5f5")
+    ax.set_axis_off()
     if title:
         ax.set_title(title)
-    ax.tick_params(left=False, bottom=False, labelleft=False, labelbottom=False)
 
 
 # --- Step 5: Draw start/end markers --------------------------------------
@@ -292,14 +362,16 @@ def draw_start_end(ax, start_wp, end_wp, marker_size=120):
 
 # --- Step 6: Save figure -------------------------------------------------
 
-def save_figure(fig, carla_map, out_dir=None):
+def save_figure(fig, carla_map, out_dir=None, with_grp_route=False):
     if out_dir is None:
         out_dir = Path(__file__).resolve().parent.parent / "data" / "map_plots"
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     safe_name = carla_map.name.split("/")[-1]
-    out_path = out_dir / f"route_plot_{safe_name}.png"
-    fig.savefig(out_path, dpi=150, bbox_inches="tight", facecolor="white")
+    suffix = "_grp" if with_grp_route else ""
+    out_path = out_dir / f"route_plot_{safe_name}{suffix}.png"
+    fig.savefig(out_path, dpi=150, bbox_inches="tight", pad_inches=0,
+                facecolor="white")
     return out_path
 
 
@@ -314,8 +386,12 @@ def main():
     arrow_data = get_arrow_geometry(carla_map)
     x_min, x_max, y_min, y_max = get_map_bounds(carla_map)
 
-    # Step 3
+    # Step 3 (needed for GRP and for start/end markers)
     start_wp, end_wp = choose_start_end(carla_map)
+
+    # Step 3b: GlobalRoutePlanner route (optional)
+    route_xs, route_ys = (compute_grp_route(carla_map, start_wp, end_wp)
+                          if DRAW_GRP_ROUTE else (None, None))
 
     # Aerial capture (optional)
     aerial_rgb, extent = None, None
@@ -329,28 +405,32 @@ def main():
 
     # Step 4 & 5
     fig, ax = plt.subplots(1, 1, facecolor="white")
-    map_title = f"CARLA {carla_map.name.split('/')[-1]} Lanes"
 
     if aerial_rgb is not None and extent is not None:
         ax.imshow(
             aerial_rgb,
             extent=[extent[0], extent[1], extent[2], extent[3]],
-            origin="lower",
+            origin="upper",
             aspect="equal",
             zorder=0,
         )
         ax.set_xlim(extent[0], extent[1])
         ax.set_ylim(extent[2], extent[3])
-        draw_map(ax, xs, ys, title=map_title, arrow_data=arrow_data,
-                 use_aerial=True)
+        draw_map(ax, xs, ys, arrow_data=arrow_data, use_aerial=True)
     else:
-        draw_map(ax, xs, ys, title=map_title, arrow_data=arrow_data,
-                 use_aerial=False)
+        draw_map(ax, xs, ys, arrow_data=arrow_data, use_aerial=False)
 
-    draw_start_end(ax, start_wp, end_wp)
+    if DRAW_START_END:
+        draw_start_end(ax, start_wp, end_wp)
+
+    if DRAW_GRP_ROUTE and route_xs is not None and route_ys is not None:
+        draw_grp_route(ax, route_xs, route_ys)
 
     # Step 6
-    out_path = save_figure(fig, carla_map)
+    out_path = save_figure(
+        fig, carla_map,
+        with_grp_route=(DRAW_GRP_ROUTE and route_xs is not None),
+    )
     print(f"Saved: {out_path}")
     plt.show()
 
