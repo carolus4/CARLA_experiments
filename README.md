@@ -30,4 +30,6 @@ Systematically varied environment (sun position, cloudiness, precipitation, wetn
 
 ## Route-following (BasicAgent)
 
+Drew a map with aerial view + directional lanes overlaid. Copied the BasicAgent and rendered a 45s drive.
+
 → [Closed-loop drive notes](notes/04.%20closed%20loop%20drive.md)
