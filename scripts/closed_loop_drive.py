@@ -36,7 +36,7 @@ WARMUP_TICKS = 10
 MAX_FRAMES = 6000  # safety cap: 10 min at 10 fps
 # Agent: lower speed and denser waypoints for reliable turns
 TARGET_SPEED_KMH = 15
-SAMPLING_RESOLUTION = 1.0
+SAMPLING_RESOLUTION = 2.0
 # Route A→B: spawn 0 = A, spawn END_SPAWN_INDEX = B (match scripts/2Dplot_route.py)
 END_SPAWN_INDEX = 10
 
@@ -136,9 +136,18 @@ def main():
         _log("Connecting to CARLA at 127.0.0.1:2000 (timeout={}s)...".format(args.timeout))
         client = carla.Client("127.0.0.1", 2000)
         client.set_timeout(args.timeout)
-        _log("Waiting for world...")
-        world = client.get_world()
-        _log("Connected. Loading world settings...")
+        _log("Loading world (same map selection as 2Dplot_route.py)...")
+        # Use load_world with the same preferred-map logic as 2Dplot_route.py
+        # so that spawn points are in a consistent order. get_world() alone can
+        # return a stale world whose spawn list differs from a freshly loaded one.
+        available = [m.split("/")[-1] for m in client.get_available_maps()]
+        preferred = ["Town10", "Town10HD", "Town10_Opt", "Town01", "Town02"]
+        map_name = next(
+            (m for m in preferred if m in available),
+            available[0] if available else "Town01",
+        )
+        world = client.load_world(map_name)
+        _log(f"Connected. Loaded map: {map_name}")
 
         original_settings = world.get_settings()
         settings = world.get_settings()
@@ -174,6 +183,9 @@ def main():
         end_idx = min(END_SPAWN_INDEX, len(spawns) - 1)
         end_spawn = spawns[end_idx]
 
+        _log(f"  spawn[0]  raw: {start_spawn.location}")
+        _log(f"  spawn[{end_idx}] raw: {end_spawn.location}")
+
         # Prefer driving-lane waypoint for correct orientation; fall back to spawn if collision
         # Use same waypoint logic as 2Dplot_route so the planned route matches the map (same A→B).
         start_wp = carla_map.get_waypoint(
@@ -186,10 +198,16 @@ def main():
             project_to_road=True,
             lane_type=carla.LaneType.Driving,
         )
+
+        _log(f"  start_wp:  {start_wp.transform.location}")
+        _log(f"  end_wp:    {end_wp.transform.location}")
+
         vehicle_bp = bp.filter("vehicle.tesla.model3")[0]
         vehicle = world.try_spawn_actor(vehicle_bp, start_wp.transform)
         if vehicle is None:
+            _log("  (waypoint spawn failed, using raw spawn as fallback)")
             vehicle = world.spawn_actor(vehicle_bp, start_spawn)
+        _log(f"  vehicle actual pos: {vehicle.get_transform().location}")
         _log("Vehicle spawned. Setting up agent and camera...")
 
         agent, use_agent = _get_basic_agent(
@@ -199,12 +217,24 @@ def main():
             opt_dict={"sampling_resolution": SAMPLING_RESOLUTION},
         )
         if use_agent:
-            # Destination must be the driving-lane waypoint at end spawn (same as 2Dplot_route),
-            # not the raw spawn location, so the planner computes the same route (e.g. two lefts).
-            agent.set_destination(
+            # Compute the route directly via GlobalRoutePlanner (same as 2Dplot_route.py)
+            # instead of agent.set_destination(), which re-snaps start/end through an extra
+            # get_waypoint() call that can land on a different graph node and pick a
+            # different shortest path (e.g. right turn instead of the expected two lefts).
+            route_trace = agent.get_global_planner().trace_route(
+                start_wp.transform.location,
                 end_wp.transform.location,
-                start_location=start_wp.transform.location,
             )
+            agent.set_global_plan(route_trace)
+            # Debug: dump the planned route waypoints and road options
+            plan = agent.get_local_planner().get_plan()
+            _log(f"  Planned route has {len(plan)} waypoints")
+            for idx, (wp, road_opt) in enumerate(plan):
+                loc = wp.transform.location
+                _log(f"    [{idx:3d}] ({loc.x:8.2f}, {loc.y:8.2f})  {road_opt}")
+                if idx > 30:
+                    _log(f"    ... ({len(plan) - 31} more)")
+                    break
         else:
             vehicle.set_autopilot(True)
             print("Warning: BasicAgent not found; using plain autopilot. Route is not guaranteed A→B.")

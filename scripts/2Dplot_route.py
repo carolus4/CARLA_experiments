@@ -250,6 +250,9 @@ def choose_start_end(carla_map):
     end_idx = min(END_SPAWN_INDEX, len(spawns) - 1)
     end_tf = spawns[end_idx]
 
+    print(f"  spawn[0]  raw: {start_tf.location}")
+    print(f"  spawn[{end_idx}] raw: {end_tf.location}")
+
     start_wp = carla_map.get_waypoint(
         start_tf.location, project_to_road=True,
         lane_type=carla.LaneType.Driving,
@@ -258,6 +261,10 @@ def choose_start_end(carla_map):
         end_tf.location, project_to_road=True,
         lane_type=carla.LaneType.Driving,
     )
+
+    print(f"  start_wp:  {start_wp.transform.location}")
+    print(f"  end_wp:    {end_wp.transform.location}")
+
     return start_wp, end_wp
 
 
@@ -285,10 +292,15 @@ def compute_grp_route(carla_map, start_wp, end_wp,
 
         route_xs = []
         route_ys = []
-        for wp, _ in route_trace:
+        for idx, (wp, road_opt) in enumerate(route_trace):
             loc = wp.transform.location
             route_xs.append(loc.x)
             route_ys.append(-loc.y)
+            if idx <= 31:
+                print(f"    [{idx:3d}] ({loc.x:8.2f}, {loc.y:8.2f})  {road_opt}")
+            elif idx == 32:
+                print(f"    ... ({len(route_trace) - 32} more)")
+        print(f"  GRP route has {len(route_trace)} waypoints")
         return route_xs, route_ys
     except Exception:
         return None, None
