@@ -27,3 +27,7 @@ Systematically varied environment (sun position, cloudiness, precipitation, wetn
 ![Walker](data/illustrations/walker.gif)
 
 → [Variations and notes](notes/03.%20worldbuilding.md)
+
+## Route-following (BasicAgent)
+
+→ [Closed-loop drive notes](notes/04.%20closed%20loop%20drive.md)

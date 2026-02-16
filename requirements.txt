@@ -4,3 +4,7 @@ Pillow>=10.0
 opencv-python>=4.8
 matplotlib>=3.8
 pyyaml>=6.0
+
+# For CARLA BasicAgent (third_party/carla_pythonapi)
+networkx
+shapely
