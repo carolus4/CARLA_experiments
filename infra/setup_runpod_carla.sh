@@ -29,11 +29,27 @@ ALIAS="${ALIAS:-runpod-carla}"
 
 # Where your code lives on the pod
 REPO_DIR="${REPO_DIR:-/workspace/CARLA_experiments}"
-# Optional: if REPO_DIR doesn't exist, provide REPO_URL to clone
-REPO_URL="${REPO_URL:-}"
+# Auto-detect REPO_URL from current git repo if not set
+if [ -z "${REPO_URL:-}" ]; then
+  if git rev-parse --git-dir >/dev/null 2>&1; then
+    REPO_URL="$(git remote get-url origin 2>/dev/null || echo '')"
+    if [ -n "$REPO_URL" ]; then
+      # Convert HTTPS URL to SSH format if needed (since we're using SSH keys)
+      if [[ "$REPO_URL" =~ ^https://github.com/(.+)/(.+)(\.git)?$ ]]; then
+        REPO_URL="git@github.com:${BASH_REMATCH[1]}/${BASH_REMATCH[2]%.git}.git"
+      elif [[ "$REPO_URL" =~ ^https://(.+)/(.+)/(.+)(\.git)?$ ]]; then
+        # Generic HTTPS to SSH conversion
+        REPO_URL="git@${BASH_REMATCH[1]}:${BASH_REMATCH[2]}/${BASH_REMATCH[3]%.git}.git"
+      fi
+      echo "==> Auto-detected REPO_URL from current repo: $REPO_URL"
+    fi
+  fi
+fi
 
 # Where CARLA is installed on the pod
-CARLA_DIR="${CARLA_DIR:-/opt/carla}"
+# Default to /workspace/carla (persistent storage) if available, otherwise /opt/carla
+# The install script will auto-detect and use persistent storage, so this should match
+CARLA_DIR="${CARLA_DIR:-/workspace/carla}"
 CARLA_PORT="${CARLA_PORT:-2000}"
 
 # Additional CARLA args (you can override if needed)
@@ -69,6 +85,33 @@ if [ ! -f "$PUBKEY_PATH" ]; then
   exit 1
 fi
 PUBKEY="$(cat "$PUBKEY_PATH")"
+
+# -----------------------------
+# Add SSH key to ssh-agent for session (avoid repeated passphrase prompts)
+# -----------------------------
+echo "==> Adding SSH key to ssh-agent for this session..."
+if [ -z "${SSH_AUTH_SOCK:-}" ]; then
+  echo "⚠️ SSH agent not running. Starting ssh-agent..."
+  eval "$(ssh-agent -s)" > /dev/null
+fi
+
+# Check if key is already loaded
+if ssh-add -l 2>/dev/null | grep -q "$(ssh-keygen -lf "$KEY" 2>/dev/null | awk '{print $2}')" 2>/dev/null; then
+  echo "SSH key already loaded in ssh-agent"
+else
+  ssh-add "$KEY"
+  echo "SSH key added to ssh-agent"
+fi
+
+# Also add GitHub deploy key if it exists and is different
+if [ "$GITHUB_DEPLOY_KEY" != "$KEY" ] && [ -f "$GITHUB_DEPLOY_KEY" ]; then
+  if ssh-add -l 2>/dev/null | grep -q "$(ssh-keygen -lf "$GITHUB_DEPLOY_KEY" 2>/dev/null | awk '{print $2}')" 2>/dev/null; then
+    echo "GitHub deploy key already loaded in ssh-agent"
+  else
+    ssh-add "$GITHUB_DEPLOY_KEY"
+    echo "GitHub deploy key added to ssh-agent"
+  fi
+fi
 
 # -----------------------------
 # Update ~/.ssh/config (replace block)
@@ -170,7 +213,11 @@ elif [ -n "$REPO_URL" ]; then
   run_as_carla "git clone '$REPO_URL' '$REPO_DIR'"
   echo "Repo cloned: $REPO_DIR"
 else
-  echo "⚠️ Repo not found at $REPO_DIR and REPO_URL not set; skipping git update."
+  echo "⚠️ Repo not found at $REPO_DIR and REPO_URL not set."
+  echo "   Set REPO_URL environment variable to clone the repo, e.g.:"
+  echo "   REPO_URL=git@github.com:user/CARLA_experiments.git ./setup_runpod_carla.sh ..."
+  echo "   Or run this script from within a git repository to auto-detect the URL."
+  exit 1
 fi
 REMOTE
 
@@ -211,9 +258,9 @@ if [ ! -x "$CARLA_DIR/CarlaUE4.sh" ]; then
     if [ -f "$REPO_DIR/infra/install_carla.sh" ]; then
       echo "CARLA not found at $CARLA_DIR. Running install script..."
       if [ "\$(id -u)" -eq 0 ]; then
-        START_CARLA=1 bash "$REPO_DIR/infra/install_carla.sh"
+        CARLA_ROOT="$CARLA_DIR" START_CARLA=1 bash "$REPO_DIR/infra/install_carla.sh"
       else
-        sudo START_CARLA=1 bash "$REPO_DIR/infra/install_carla.sh"
+        sudo CARLA_ROOT="$CARLA_DIR" START_CARLA=1 bash "$REPO_DIR/infra/install_carla.sh"
       fi
     else
       echo "Install script not found at $REPO_DIR/infra/install_carla.sh"
