@@ -1,0 +1,34 @@
+# Minimal dependencies for PCLA TransfuserV6 vision-only agent (tfv6_visiononly).
+# Use with Python 3.8.
+#
+# Install order: 1) PyTorch + torchvision (for your CUDA), 2) pip install -r this file.
+# torch-scatter needs torch installed first (its build imports torch).
+# If you hit ImportError when running run_pcla_vision.py, add the missing package here.
+
+# CARLA 0.9.16: install from third_party/PCLA/dist/ or pip
+# carla==0.9.16
+
+numpy
+opencv-python
+Pillow
+matplotlib
+scipy
+beartype
+lxml
+networkx
+simple-watchdog-timer
+py-trees==0.8.3
+omegaconf
+numba
+filterpy
+wandb
+torchmetrics
+tqdm
+timm
+shapely
+scikit-image
+
+# torch-scatter: install AFTER PyTorch (build needs torch). Use build isolation off so pip sees your torch:
+#   pip install torch torchvision
+#   pip install --no-build-isolation torch-scatter
+# Or use a prebuilt wheel from https://data.pyg.org/whl/ for your torch+cu version.

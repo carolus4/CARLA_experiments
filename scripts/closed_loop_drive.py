@@ -1,6 +1,7 @@
 """
 Drive ego from spawn 0 to spawn 10 (A→B) with autopilot, render camera view.
-Uses BasicAgent when available for route following; otherwise falls back to
+Uses BehaviorAgent when available for route following (traffic lights, speed limits,
+vehicle avoidance); if unavailable, falls back to BasicAgent, then to
 vehicle.set_autopilot(True) (route not guaranteed A→B).
 Captures the full trip until the agent reaches B (or MAX_FRAMES at 10 fps).
 Output: data/closed_loop_frames/frame_0000.png, frame_0001.png, ...
@@ -69,6 +70,61 @@ def _get_basic_agent(vehicle, world, target_speed=20, opt_dict=None):
             sys.path.insert(0, parent)
         from agents.navigation.basic_agent import BasicAgent
         return BasicAgent(vehicle, target_speed=target_speed, opt_dict=opt_dict), True
+    except ImportError:
+        pass
+    return None, False
+
+
+def _get_behavior_agent(vehicle, world, carla_map, target_speed=20, opt_dict=None):
+    """Import BehaviorAgent and return (agent, True) or (None, False) if unavailable."""
+    opt_dict = opt_dict or {}
+    try:
+        from agents.navigation.behavior_agent import BehaviorAgent
+        agent = BehaviorAgent(
+            vehicle,
+            behavior="normal",
+            opt_dict=opt_dict,
+            map_inst=carla_map,
+            grp_inst=None,
+        )
+        agent._target_speed = target_speed
+        return agent, True
+    except ImportError:
+        pass
+    try:
+        carla_root = os.environ.get("CARLA_ROOT")
+        if carla_root:
+            api_path = os.path.join(carla_root, "PythonAPI", "carla")
+            if os.path.isdir(api_path):
+                if api_path not in sys.path:
+                    sys.path.insert(0, api_path)
+                from agents.navigation.behavior_agent import BehaviorAgent
+                agent = BehaviorAgent(
+                    vehicle,
+                    behavior="normal",
+                    opt_dict=opt_dict,
+                    map_inst=carla_map,
+                    grp_inst=None,
+                )
+                agent._target_speed = target_speed
+                return agent, True
+    except ImportError:
+        pass
+    try:
+        carla_dir = os.path.dirname(os.path.abspath(carla.__file__))
+        parent = os.path.dirname(carla_dir)
+        if parent not in sys.path:
+            sys.path.insert(0, parent)
+        from agents.navigation.behavior_agent import BehaviorAgent
+        agent = BehaviorAgent(
+            vehicle,
+            behavior="normal",
+            opt_dict=opt_dict,
+            map_inst=carla_map,
+            grp_inst=None,
+        )
+        agent._target_speed = target_speed
+        return agent, True
     except ImportError:
         pass
     return None, False
@@ -210,12 +266,20 @@ def main():
         _log(f"  vehicle actual pos: {vehicle.get_transform().location}")
         _log("Vehicle spawned. Setting up agent and camera...")
 
-        agent, use_agent = _get_basic_agent(
+        agent, use_agent = _get_behavior_agent(
             vehicle,
             world,
+            carla_map,
             target_speed=TARGET_SPEED_KMH,
             opt_dict={"sampling_resolution": SAMPLING_RESOLUTION},
         )
+        if not use_agent:
+            agent, use_agent = _get_basic_agent(
+                vehicle,
+                world,
+                target_speed=TARGET_SPEED_KMH,
+                opt_dict={"sampling_resolution": SAMPLING_RESOLUTION},
+            )
         if use_agent:
             # Compute the route directly via GlobalRoutePlanner (same as 2Dplot_route.py)
             # instead of agent.set_destination(), which re-snaps start/end through an extra
@@ -237,7 +301,7 @@ def main():
                     break
         else:
             vehicle.set_autopilot(True)
-            print("Warning: BasicAgent not found; using plain autopilot. Route is not guaranteed A→B.")
+            print("Warning: BehaviorAgent and BasicAgent not found; using plain autopilot. Route is not guaranteed A→B.")
 
         camera_tf = carla.Transform(
             carla.Location(x=2.0, z=1.55), carla.Rotation(pitch=0, yaw=0, roll=0)
