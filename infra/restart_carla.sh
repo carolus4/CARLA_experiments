@@ -8,12 +8,17 @@
 #   ./restart_carla.sh --start   # start only (no-op if already running)
 #
 # Env (match install_carla.sh / setup_runpod_carla.sh):
-#   CARLA_ROOT   default /opt/carla
+#   CARLA_ROOT   default: /workspace/carla if /workspace writable, else /opt/carla
 #   CARLA_PORT   default 2000
 #   CARLA_USER   default carla (used when run as root to start CARLA)
 set -euo pipefail
 
-CARLA_ROOT="${CARLA_ROOT:-/opt/carla}"
+if [ -d "/workspace" ] && [ -w "/workspace" ] && [ -d "/workspace/carla" ]; then
+  DEFAULT_CARLA_ROOT="/workspace/carla"
+else
+  DEFAULT_CARLA_ROOT="/opt/carla"
+fi
+CARLA_ROOT="${CARLA_ROOT:-$DEFAULT_CARLA_ROOT}"
 CARLA_PORT="${CARLA_PORT:-2000}"
 CARLA_USER="${CARLA_USER:-carla}"
 STOP_ONLY=0
@@ -78,15 +83,39 @@ do_start() {
     export DISPLAY="${DISPLAY:-:99}"
     CARLA_ARGS="${CARLA_ARGS:--RenderOffScreen -nosound -opengl -carla-rpc-port=${CARLA_PORT}}"
     LOG="${LOG:-/tmp/carla_${CARLA_PORT}.log}"
-    cd "$CARLA_ROOT"
-    nohup ./CarlaUE4.sh $CARLA_ARGS > "$LOG" 2>&1 &
-    sleep 2
-    if pgrep -f "CarlaUE4" >/dev/null 2>&1; then
-      echo "  CARLA started. Log: $LOG"
+    # CARLA refuses to run as root; start as CARLA_USER when possible
+    if [ "$(id -u)" -eq 0 ] && id -u "$CARLA_USER" >/dev/null 2>&1; then
+      # So carla user can write the log (e.g. if it was left root-owned from a previous run)
+      [ -f "$LOG" ] && chown "$CARLA_USER" "$LOG" 2>/dev/null || true
+      su - "$CARLA_USER" -c "export DISPLAY=${DISPLAY:-:99}; cd ${CARLA_ROOT} && nohup ./CarlaUE4.sh ${CARLA_ARGS} > ${LOG} 2>&1 &"
     else
-      echo "  CARLA may have failed to start. Check: $LOG"
+      cd "$CARLA_ROOT"
+      nohup ./CarlaUE4.sh $CARLA_ARGS > "$LOG" 2>&1 &
+    fi
+    echo "  Waiting for CARLA process (can take 30–60s)..."
+    for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+      sleep 3
+      if pgrep -f "CarlaUE4" >/dev/null 2>&1; then
+        break
+      fi
+    done
+    if ! pgrep -f "CarlaUE4" >/dev/null 2>&1; then
+      echo "  CARLA process did not appear after 60s. Check: $LOG"
+      [ -f "$LOG" ] && { echo "  Last 15 lines of log:"; tail -15 "$LOG" | sed 's/^/    /'; }
       return 1
     fi
+    echo "  Process running. Waiting for RPC port ${CARLA_PORT} (can take 30–90s more)..."
+    for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24; do
+      sleep 5
+      if (command -v nc >/dev/null 2>&1 && nc -z 127.0.0.1 "$CARLA_PORT" 2>/dev/null) || \
+         (timeout 2 bash -c "echo >/dev/tcp/127.0.0.1/$CARLA_PORT" 2>/dev/null); then
+        echo "  CARLA started and ready. Log: $LOG"
+        return 0
+      fi
+    done
+    echo "  RPC port ${CARLA_PORT} not ready after 120s. Check: $LOG"
+    [ -f "$LOG" ] && { echo "  Last 15 lines of log:"; tail -15 "$LOG" | sed 's/^/    /'; }
+    return 1
   fi
   return 0
 }

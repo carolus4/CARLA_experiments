@@ -14,12 +14,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 from pathlib import Path
 
-# Prepend vendored CARLA PythonAPI so GlobalRoutePlanner is importable
 _script_dir = os.path.dirname(os.path.abspath(__file__))
-_repo_root = os.path.dirname(_script_dir)
-_vendored = os.path.join(_repo_root, "third_party", "carla_pythonapi")
-if os.path.isdir(_vendored) and _vendored not in sys.path:
-    sys.path.insert(0, _vendored)
+sys.path.insert(0, _script_dir)
+import route_plan
+
+import carla
 
 HOST, PORT = "127.0.0.1", 2000
 USE_AERIAL = True  # Set False to skip aerial capture and use schematic-only
@@ -33,28 +32,14 @@ ARROW_SCALE = 8         # quiver scale (e.g. 4 = bigger, 10 = smaller)
 ARROW_SHAFT_WIDTH = 0.005
 ARROW_HEADWIDTH = 3
 ARROW_HEADLENGTH = 4
-END_SPAWN_INDEX = 10  # which spawn point to use for B
-
-# GlobalRoutePlanner sampling resolution (meters between graph nodes)
-GRP_SAMPLING_RESOLUTION = 2.0
 
 
 # --- Step 1: Connect to CARLA, load preferred map, get carla_map -----------
 
-def _short_map_name(path: str) -> str:
-    """e.g. /Game/Carla/Maps/Town01 -> Town01"""
-    return path.split("/")[-1] if "/" in path else path
-
-
 def connect_and_load_map():
     client = carla.Client(HOST, PORT)
-    client.set_timeout(10.0)
-    available = [_short_map_name(m) for m in client.get_available_maps()]
-    preferred = ["Town10", "Town10HD", "Town10_Opt", "Town01", "Town02"]
-    map_name = next(
-        (m for m in preferred if m in available),
-        available[0] if available else "Town01",
-    )
+    client.set_timeout(60.0)  # load_world (e.g. Town10HD) can take longer than 10s
+    map_name = route_plan.select_map_name(client.get_available_maps())
     world = client.load_world(map_name)
     carla_map = world.get_map()
     return client, world, carla_map
@@ -234,78 +219,6 @@ def capture_aerial(world, x_min, x_max, y_min, y_max, image_size=1920):
         world.apply_settings(original_settings)
 
 
-# --- Step 3: Choose start and end (spawns[0] and spawns[END_SPAWN_INDEX]) --
-
-def choose_start_end(carla_map):
-    """Pick start = spawns[0], end = spawns[END_SPAWN_INDEX] (or last if fewer)."""
-    spawns = carla_map.get_spawn_points()
-    if len(spawns) < 2:
-        wp = carla_map.get_waypoint(
-            spawns[0].location, project_to_road=True,
-            lane_type=carla.LaneType.Driving,
-        )
-        return wp, wp
-
-    start_tf = spawns[0]
-    end_idx = min(END_SPAWN_INDEX, len(spawns) - 1)
-    end_tf = spawns[end_idx]
-
-    print(f"  spawn[0]  raw: {start_tf.location}")
-    print(f"  spawn[{end_idx}] raw: {end_tf.location}")
-
-    start_wp = carla_map.get_waypoint(
-        start_tf.location, project_to_road=True,
-        lane_type=carla.LaneType.Driving,
-    )
-    end_wp = carla_map.get_waypoint(
-        end_tf.location, project_to_road=True,
-        lane_type=carla.LaneType.Driving,
-    )
-
-    print(f"  start_wp:  {start_wp.transform.location}")
-    print(f"  end_wp:    {end_wp.transform.location}")
-
-    return start_wp, end_wp
-
-
-# --- Step 3b: GlobalRoutePlanner route A→B (optional) -------------------
-
-def compute_grp_route(carla_map, start_wp, end_wp,
-                      sampling_resolution=GRP_SAMPLING_RESOLUTION):
-    """Compute shortest route from start to end using GlobalRoutePlanner.
-
-    Returns (route_xs, route_ys) in plot coords (Y negated), or (None, None) if
-    GlobalRoutePlanner is unavailable or any error occurs (optional feature).
-    """
-    try:
-        from agents.navigation.global_route_planner import GlobalRoutePlanner
-    except ImportError:
-        return None, None
-
-    try:
-        grp = GlobalRoutePlanner(carla_map, sampling_resolution)
-        origin = start_wp.transform.location
-        destination = end_wp.transform.location
-        route_trace = grp.trace_route(origin, destination)
-        if not route_trace:
-            return None, None
-
-        route_xs = []
-        route_ys = []
-        for idx, (wp, road_opt) in enumerate(route_trace):
-            loc = wp.transform.location
-            route_xs.append(loc.x)
-            route_ys.append(-loc.y)
-            if idx <= 31:
-                print(f"    [{idx:3d}] ({loc.x:8.2f}, {loc.y:8.2f})  {road_opt}")
-            elif idx == 32:
-                print(f"    ... ({len(route_trace) - 32} more)")
-        print(f"  GRP route has {len(route_trace)} waypoints")
-        return route_xs, route_ys
-    except Exception:
-        return None, None
-
-
 def draw_grp_route(ax, route_xs, route_ys, color="#34A853",
                    linewidth=2.5, zorder=3):
     """Draw the GlobalRoutePlanner route as a single polyline on the map."""
@@ -398,12 +311,30 @@ def main():
     arrow_data = get_arrow_geometry(carla_map)
     x_min, x_max, y_min, y_max = get_map_bounds(carla_map)
 
-    # Step 3 (needed for GRP and for start/end markers)
-    start_wp, end_wp = choose_start_end(carla_map)
+    # Step 3: start/end waypoints and optional GRP route (from route_plan)
+    start_wp, end_wp, end_idx = route_plan.get_start_end_waypoints(carla_map)
+    spawns = carla_map.get_spawn_points()
+    print(f"  spawn[0]  raw: {spawns[0].location}")
+    print(f"  spawn[{end_idx}] raw: {spawns[end_idx].location}")
+    print(f"  start_wp:  {start_wp.transform.location}")
+    print(f"  end_wp:    {end_wp.transform.location}")
 
-    # Step 3b: GlobalRoutePlanner route (optional)
-    route_xs, route_ys = (compute_grp_route(carla_map, start_wp, end_wp)
-                          if DRAW_GRP_ROUTE else (None, None))
+    route_xs, route_ys = None, None
+    if DRAW_GRP_ROUTE:
+        try:
+            route_trace = route_plan.trace_route(carla_map, start_wp, end_wp)
+            if route_trace:
+                route_xs, route_ys = route_plan.route_trace_to_plot_coords(route_trace)
+                for idx, (wp, road_opt) in enumerate(route_trace):
+                    if idx <= 31:
+                        loc = wp.transform.location
+                        print(f"    [{idx:3d}] ({loc.x:8.2f}, {loc.y:8.2f})  {road_opt}")
+                    elif idx == 32:
+                        print(f"    ... ({len(route_trace) - 32} more)")
+                        break
+                print(f"  GRP route has {len(route_trace)} waypoints")
+        except Exception:
+            route_xs, route_ys = None, None
 
     # Aerial capture (optional)
     aerial_rgb, extent = None, None

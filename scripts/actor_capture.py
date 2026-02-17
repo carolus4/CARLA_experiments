@@ -83,6 +83,52 @@ def get_walker_crossing_fixed(ego_transform: carla.Transform):
     return start_loc, target_loc
 
 
+def get_walker_crossing_fixed_with_offset(ego_transform: carla.Transform, offset_along_road_m: float = 0.0):
+    """
+    Same as get_walker_crossing_fixed, but shift both start and target along the road
+    by offset_along_road_m (in the forward direction). Use to place multiple walkers
+    spread along the same crosswalk.
+    """
+    start_loc, target_loc = get_walker_crossing_fixed(ego_transform)
+    if offset_along_road_m == 0.0:
+        return start_loc, target_loc
+    forward = _ego_forward(ego_transform)
+    start_loc = carla.Location(
+        x=start_loc.x + offset_along_road_m * forward.x,
+        y=start_loc.y + offset_along_road_m * forward.y,
+        z=start_loc.z,
+    )
+    target_loc = carla.Location(
+        x=target_loc.x + offset_along_road_m * forward.x,
+        y=target_loc.y + offset_along_road_m * forward.y,
+        z=target_loc.z,
+    )
+    return start_loc, target_loc
+
+
+def get_walker_crossing_from_waypoint(waypoint):
+    """
+    Prefer map sidewalk lanes for walker start (right) and target (left).
+    From a driving-waypoint, follow get_right_lane() / get_left_lane() until
+    lane_type == Sidewalk; use those waypoint locations so the pedestrian
+    spawns on a real crosswalk/sidewalk. Falls back to get_walker_crossing_fixed
+    if no sidewalk lanes are found on either side.
+    """
+    right = waypoint.get_right_lane()
+    while right is not None and right.lane_type != carla.LaneType.Driving:
+        if right.lane_type == carla.LaneType.Sidewalk:
+            start_loc = right.transform.location
+            left = waypoint.get_left_lane()
+            while left is not None and left.lane_type != carla.LaneType.Driving:
+                if left.lane_type == carla.LaneType.Sidewalk:
+                    target_loc = left.transform.location
+                    return start_loc, target_loc
+                left = left.get_left_lane()
+            break
+        right = right.get_right_lane()
+    return get_walker_crossing_fixed(waypoint.transform)
+
+
 def find_oncoming_spawn_point(world: carla.World, ego_transform: carla.Transform):
     """
     Pick a vehicle spawn point ahead of ego with rotation roughly opposite (oncoming).

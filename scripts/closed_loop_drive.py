@@ -16,14 +16,9 @@ import numpy as np
 from PIL import Image
 import carla
 
-# Prepend vendored CARLA PythonAPI (agents) so BasicAgent is importable
 _script_dir = os.path.dirname(os.path.abspath(__file__))
-_repo_root = os.path.dirname(_script_dir)
-_vendored = os.path.join(_repo_root, "third_party", "carla_pythonapi")
-if os.path.isdir(_vendored) and _vendored not in sys.path:
-    sys.path.insert(0, _vendored)
-
 sys.path.insert(0, _script_dir)
+import route_plan
 from set_scene import (
     DEFAULT_CLOUDINESS,
     DEFAULT_PRECIPITATION,
@@ -37,9 +32,6 @@ WARMUP_TICKS = 10
 MAX_FRAMES = 6000  # safety cap: 10 min at 10 fps
 # Agent: lower speed and denser waypoints for reliable turns
 TARGET_SPEED_KMH = 15
-SAMPLING_RESOLUTION = 2.0
-# Route A→B: spawn 0 = A, spawn END_SPAWN_INDEX = B (match scripts/2Dplot_route.py)
-END_SPAWN_INDEX = 10
 
 
 def _get_basic_agent(vehicle, world, target_speed=20, opt_dict=None):
@@ -193,15 +185,7 @@ def main():
         client = carla.Client("127.0.0.1", 2000)
         client.set_timeout(args.timeout)
         _log("Loading world (same map selection as 2Dplot_route.py)...")
-        # Use load_world with the same preferred-map logic as 2Dplot_route.py
-        # so that spawn points are in a consistent order. get_world() alone can
-        # return a stale world whose spawn list differs from a freshly loaded one.
-        available = [m.split("/")[-1] for m in client.get_available_maps()]
-        preferred = ["Town10", "Town10HD", "Town10_Opt", "Town01", "Town02"]
-        map_name = next(
-            (m for m in preferred if m in available),
-            available[0] if available else "Town01",
-        )
+        map_name = route_plan.select_map_name(client.get_available_maps())
         world = client.load_world(map_name)
         _log(f"Connected. Loaded map: {map_name}")
 
@@ -231,30 +215,13 @@ def main():
         _log("Loading blueprint library and map...")
         bp = world.get_blueprint_library()
         carla_map = world.get_map()
+        start_wp, end_wp, end_idx = route_plan.get_start_end_waypoints(carla_map)
         spawns = carla_map.get_spawn_points()
-        if not spawns:
-            raise RuntimeError("No spawn points on this map.")
-        _log("Spawning vehicle at spawn 0...")
         start_spawn = spawns[0]
-        end_idx = min(END_SPAWN_INDEX, len(spawns) - 1)
-        end_spawn = spawns[end_idx]
 
+        _log("Spawning vehicle at spawn 0...")
         _log(f"  spawn[0]  raw: {start_spawn.location}")
-        _log(f"  spawn[{end_idx}] raw: {end_spawn.location}")
-
-        # Prefer driving-lane waypoint for correct orientation; fall back to spawn if collision
-        # Use same waypoint logic as 2Dplot_route so the planned route matches the map (same A→B).
-        start_wp = carla_map.get_waypoint(
-            start_spawn.location,
-            project_to_road=True,
-            lane_type=carla.LaneType.Driving,
-        )
-        end_wp = carla_map.get_waypoint(
-            end_spawn.location,
-            project_to_road=True,
-            lane_type=carla.LaneType.Driving,
-        )
-
+        _log(f"  spawn[{end_idx}] raw: {spawns[end_idx].location}")
         _log(f"  start_wp:  {start_wp.transform.location}")
         _log(f"  end_wp:    {end_wp.transform.location}")
 
@@ -271,24 +238,17 @@ def main():
             world,
             carla_map,
             target_speed=TARGET_SPEED_KMH,
-            opt_dict={"sampling_resolution": SAMPLING_RESOLUTION},
+            opt_dict={"sampling_resolution": route_plan.DEFAULT_SAMPLING_RESOLUTION},
         )
         if not use_agent:
             agent, use_agent = _get_basic_agent(
                 vehicle,
                 world,
                 target_speed=TARGET_SPEED_KMH,
-                opt_dict={"sampling_resolution": SAMPLING_RESOLUTION},
+                opt_dict={"sampling_resolution": route_plan.DEFAULT_SAMPLING_RESOLUTION},
             )
         if use_agent:
-            # Compute the route directly via GlobalRoutePlanner (same as 2Dplot_route.py)
-            # instead of agent.set_destination(), which re-snaps start/end through an extra
-            # get_waypoint() call that can land on a different graph node and pick a
-            # different shortest path (e.g. right turn instead of the expected two lefts).
-            route_trace = agent.get_global_planner().trace_route(
-                start_wp.transform.location,
-                end_wp.transform.location,
-            )
+            route_trace = route_plan.trace_route(carla_map, start_wp, end_wp)
             agent.set_global_plan(route_trace)
             # Debug: dump the planned route waypoints and road options
             plan = agent.get_local_planner().get_plan()

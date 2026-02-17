@@ -125,3 +125,5 @@ echo "Weights location: $WEIGHTS_DIR/transfuserv6_pretrained/"
 echo
 echo "Verify with:"
 echo "  ls $WEIGHTS_DIR/transfuserv6_pretrained/visiononly_resnet34/"
+echo
+echo "Note: visiononly_resnet34 uses 6-cam at runtime (target_dataset injected by sensor agent for 984-token checkpoint)."
