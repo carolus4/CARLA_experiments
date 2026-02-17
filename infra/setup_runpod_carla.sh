@@ -3,16 +3,24 @@ set -euo pipefail
 
 if [ $# -lt 1 ]; then
   echo "Usage:"
-  echo "  ./setup_runpod_carla.sh \"ssh user@host -p 12345 -i ~/.ssh/id_ed25519\" [--no-install]"
+  echo "  ./setup_runpod_carla.sh \"ssh user@host -p 12345 -i ~/.ssh/id_ed25519\" [--no-install] [--pcla]"
   echo ""
   echo "  By default: installs CARLA on the pod if missing, then starts CARLA (ready to develop)."
   echo "  --no-install  Skip install; only start CARLA if already installed."
+  echo "  --pcla        Also install PCLA TransfuserV6 venv + dependencies (no weights)."
   exit 1
 fi
 
 SSH_CMD="$1"
 INSTALL=1
-[ "${2:-}" = "--no-install" ] && INSTALL=0
+PCLA=0
+shift
+for arg in "$@"; do
+  case "$arg" in
+    --no-install) INSTALL=0 ;;
+    --pcla)       PCLA=1 ;;
+  esac
+done
 
 # -----------------------------
 # Config (override via env vars)
@@ -233,6 +241,41 @@ else
   exit 1
 fi
 REMOTE
+
+# -----------------------------
+# Remote: PCLA TransfuserV6 setup (optional)
+# -----------------------------
+if [ "$PCLA" = "1" ]; then
+  echo "==> Setting up PCLA TransfuserV6 environment..."
+
+  # Initialize PCLA submodule
+  ssh -T "$ALIAS" "bash -s" <<REMOTE
+set -euo pipefail
+run_as_carla() { su - carla -c "\$*"; }
+
+if [ -d "$REPO_DIR/.git" ]; then
+  run_as_carla "cd '$REPO_DIR' && git submodule update --init third_party/PCLA"
+  echo "PCLA submodule initialized."
+else
+  echo "Repo not found at $REPO_DIR; skipping submodule init."
+fi
+REMOTE
+
+  # Install PCLA venv + dependencies
+  ssh -T "$ALIAS" "bash -s" <<REMOTE
+set -euo pipefail
+if [ -f "$REPO_DIR/infra/install_pcla_tfv6.sh" ]; then
+  bash "$REPO_DIR/infra/install_pcla_tfv6.sh"
+else
+  echo "install_pcla_tfv6.sh not found at $REPO_DIR/infra/. Pull the latest repo."
+  exit 1
+fi
+REMOTE
+
+  echo "==> PCLA venv ready."
+  echo "    To download weights (~34 GB), SSH in and run:"
+  echo "      bash $REPO_DIR/infra/download_tfv6_weights.sh"
+fi
 
 echo "==> Done."
 echo "Connect via:"
