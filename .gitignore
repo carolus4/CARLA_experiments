@@ -29,5 +29,5 @@ checkpoints/
 data/*
 !data/illustrations/
 
-# carla: ignore the carla binary and associated files
+# Dependencies: ignore the carla binary
 carla/
