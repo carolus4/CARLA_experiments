@@ -269,11 +269,12 @@ def main():
     cam_bp.set_attribute("fov", "120")
     camera = world.spawn_actor(cam_bp, camera_tf, attach_to=vehicle)
 
-    frame_index = [0]
+    # Step index for this tick; set right before world.tick() so all callbacks save the same frame number
+    save_step = [0]
     frame_ready = threading.Event()
 
     def on_image(image):
-        i = frame_index[0]
+        i = save_step[0]
         arr = np.frombuffer(image.raw_data, dtype=np.uint8).reshape(
             (image.height, image.width, 4)
         )
@@ -324,7 +325,7 @@ def main():
     chase_ready = threading.Event()
 
     def on_chase_image(image):
-        i = frame_index[0]
+        i = save_step[0]
         arr = np.frombuffer(image.raw_data, dtype=np.uint8).reshape(
             (image.height, image.width, 4)
         )
@@ -458,7 +459,6 @@ def main():
             if args.max_steps and step >= args.max_steps:
                 _log("Reached max steps %d." % args.max_steps)
                 break
-            frame_index[0] = step
             frame_ready.clear()
             chase_ready.clear()
             if source_cameras:
@@ -497,6 +497,7 @@ def main():
                             w["controller"].go_to_location(next_target)
                             w["target"] = next_target
 
+            save_step[0] = step  # lock step for this tick so all callbacks save same index
             world.tick()
             # Wait for camera frames
             frame_ready.wait(timeout=max(10.0, args.timeout))
@@ -507,7 +508,7 @@ def main():
                     parts = [source_buffer[cid] for cid in source_cam_ids if cid in source_buffer]
                 if parts:
                     concat = np.concatenate(parts, axis=1)
-                    path = os.path.join(source_dir, "frame_%04d.png" % step)
+                    path = os.path.join(source_dir, "frame_%04d.png" % save_step[0])
                     Image.fromarray(concat).save(path)
             step += 1
             if step <= 10 or step % 100 == 0:
