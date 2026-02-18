@@ -28,8 +28,12 @@ Systematically varied environment (sun position, cloudiness, precipitation, wetn
 
 → [Variations and notes](notes/03.%20worldbuilding.md)
 
-## Route-following (BasicAgent)
+## 04. Driving Agent
 
-Drew a map with aerial view + directional lanes overlaid. Copied the BasicAgent and rendered a 45s drive.
+Drew a map with aerial view + directional lanes overlaid. Copied the BasicAgent and rendered a 45s drive. 
+
+Copied Pretrained CARLA leaderboard Agents (PCLA), tested Transfusion_v6 as the agent:
+![Transfusion Chase](../data/illustrations/pcla_transfusion_chase.gif)
+
 
 → [Closed-loop drive notes](notes/04.%20closed%20loop%20drive.md)
