@@ -33,6 +33,7 @@ Systematically varied environment (sun position, cloudiness, precipitation, wetn
 Drew a map with aerial view + directional lanes overlaid. Copied the BasicAgent and rendered a 45s drive. 
 
 Copied Pretrained CARLA leaderboard Agents (PCLA), tested Transfusion_v6 as the agent:
+
 ![Transfusion Chase](../data/illustrations/pcla_transfusion_chase.gif)
 
 
