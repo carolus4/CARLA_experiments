@@ -34,7 +34,7 @@ Drew a map with aerial view + directional lanes overlaid. Copied the BasicAgent 
 
 Copied Pretrained CARLA leaderboard Agents (PCLA), tested Transfusion_v6 as the agent:
 
-![Transfusion Chase](../data/illustrations/pcla_transfusion_chase.gif)
+![Transfusion Chase](data/illustrations/pcla_transfusion_chase.gif)
 
 
 → [Closed-loop drive notes](notes/04.%20closed%20loop%20drive.md)
